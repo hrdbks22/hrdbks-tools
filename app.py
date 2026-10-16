@@ -33,13 +33,14 @@ def load_master_data():
     if os.path.exists(FILE_MASTER):
         try:
             df = pd.read_csv(FILE_MASTER, dtype=str)
+            if "Shf" in df.columns and "Shift" not in df.columns:
+                df.rename(columns={"Shf": "Shift"}, inplace=True)
             return df
         except Exception:
-            return pd.DataFrame(columns=["NIK", "Nama", "Bagian", "Shift"])
-    return pd.DataFrame(columns=["NIK", "Nama", "Bagian", "Shift"])
+            return pd.DataFrame(columns=["NIK", "Nama", "Shift", "Bagian"])
+    return pd.DataFrame(columns=["NIK", "Nama", "Shift", "Bagian"])
 
 def save_master_data(df):
-    # Menyimpan dan menimpa (overwrite) file master lama
     df.to_csv(FILE_MASTER, index=False)
 
 def load_panggilan_data():
@@ -100,7 +101,6 @@ st.sidebar.write(f"🏷️ **Akses:** {st.session_state.shift}")
 # Pilihan Menu Utama
 menu_options = ["Panggilan Karyawan"]
 if st.session_state.is_admin:
-    # Menu Master Data hanya muncul untuk Admin/Manager
     menu_options.insert(0, "Master Data Karyawan")
 
 menu_utama = st.sidebar.radio("Pilih Menu:", menu_options)
@@ -115,17 +115,18 @@ if st.sidebar.button("🚪 Logout", use_container_width=True):
 # ==========================================
 if menu_utama == "Master Data Karyawan":
     st.title("🗂️ Master Data Karyawan")
-    st.info("Menu ini digunakan untuk memperbarui database karyawan. Mengunggah data baru akan **menghapus data lama** secara otomatis.")
+    st.info("Menu ini mendeteksi format kolom **NIK, Nama, Shf, Bagian**. Mengunggah data baru akan **menghapus data lama** secara otomatis.")
     
     col1, col2 = st.columns([1, 2])
     
     with col1:
         st.subheader("📥 1. Download Template")
+        # Template disesuaikan dengan urutan NIK, Nama, Shf, Bagian
         template_df = pd.DataFrame({
             "NIK": ["1001", "1002"],
             "Nama": ["Budi Santoso", "Siti Aminah"],
-            "Bagian": ["Produksi", "Packing"],
-            "Shift": ["Shift E", "Shift F"]
+            "Shf": ["Shift E", "Shift F"],
+            "Bagian": ["Produksi", "Packing"]
         })
         csv_template = template_df.to_csv(index=False).encode('utf-8')
         st.download_button(
@@ -147,20 +148,33 @@ if menu_utama == "Master Data Karyawan":
                 else:
                     new_df = pd.read_excel(uploaded_file, dtype=str)
                 
-                # Memastikan kolom sesuai
-                required_cols = ["NIK", "Nama", "Bagian", "Shift"]
-                if all(col in new_df.columns for col in required_cols):
+                # Bersihkan spasi pada nama kolom
+                new_df.columns = new_df.columns.str.strip()
+                
+                required_cols = ["NIK", "Nama", "Bagian"]
+                has_shf = "Shf" in new_df.columns
+                has_shift = "Shift" in new_df.columns
+                
+                if all(col in new_df.columns for col in required_cols) and (has_shf or has_shift):
+                    # Normalisasi kolom Shf menjadi Shift untuk sistem internal
+                    if has_shf and not has_shift:
+                        new_df.rename(columns={"Shf": "Shift"}, inplace=True)
+                    elif "Shift" not in new_df.columns and "Shf" in new_df.columns:
+                        new_df["Shift"] = new_df["Shf"]
+
+                    final_cols = ["NIK", "Nama", "Bagian", "Shift"]
+                    
                     st.write("🔍 **Pratinjau Data Baru:**")
-                    st.dataframe(new_df.head(5), use_container_width=True)
+                    st.dataframe(new_df[final_cols].head(5), use_container_width=True)
                     
                     st.warning("⚠️ **Perhatian:** Mengklik tombol di bawah ini akan **MENGHAPUS SELURUH MASTER DATA LAMA** dan menggantinya dengan file ini.")
                     
                     if st.button("🔥 Hapus Data Lama & Import Data Baru", type="primary"):
-                        save_master_data(new_df[required_cols])
+                        save_master_data(new_df[final_cols])
                         st.success("✅ Master Data Karyawan berhasil diperbarui!")
                         st.rerun()
                 else:
-                    st.error(f"Format kolom tidak sesuai! Pastikan file memiliki kolom: {', '.join(required_cols)}")
+                    st.error("Format kolom tidak sesuai! Pastikan file memiliki kolom: **NIK**, **Nama**, **Shf** (atau **Shift**), dan **Bagian**.")
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 

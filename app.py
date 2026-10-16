@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import io
 from datetime import datetime
 
 # ==========================================
@@ -121,25 +122,30 @@ if menu_utama == "Master Data Karyawan":
     
     with col1:
         st.subheader("📥 1. Download Template")
-        # Template disesuaikan dengan urutan NIK, Nama, Shf, Bagian
         template_df = pd.DataFrame({
             "NIK": ["1001", "1002"],
             "Nama": ["Budi Santoso", "Siti Aminah"],
             "Shf": ["Shift E", "Shift F"],
             "Bagian": ["Produksi", "Packing"]
         })
-        csv_template = template_df.to_csv(index=False).encode('utf-8')
+        
+        # Generate file Excel (.xlsx) agar kolom terpisah otomatis di Microsoft Excel
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            template_df.to_excel(writer, index=False, sheet_name='Master_Karyawan')
+        excel_data = output.getvalue()
+        
         st.download_button(
-            label="Download Template CSV",
-            data=csv_template,
-            file_name="template_master_karyawan.csv",
-            mime="text/csv",
+            label="Download Template Excel (.xlsx)",
+            data=excel_data,
+            file_name="template_master_karyawan.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
 
     with col2:
         st.subheader("📤 2. Upload Data Baru")
-        uploaded_file = st.file_uploader("Pilih file Excel atau CSV:", type=["csv", "xlsx"])
+        uploaded_file = st.file_uploader("Pilih file Excel (.xlsx) atau CSV:", type=["csv", "xlsx"])
         
         if uploaded_file is not None:
             try:
@@ -156,7 +162,6 @@ if menu_utama == "Master Data Karyawan":
                 has_shift = "Shift" in new_df.columns
                 
                 if all(col in new_df.columns for col in required_cols) and (has_shf or has_shift):
-                    # Normalisasi kolom Shf menjadi Shift untuk sistem internal
                     if has_shf and not has_shift:
                         new_df.rename(columns={"Shf": "Shift"}, inplace=True)
                     elif "Shift" not in new_df.columns and "Shf" in new_df.columns:
@@ -204,7 +209,6 @@ elif menu_utama == "Panggilan Karyawan":
             with col_a:
                 nik_input = st.selectbox("Pilih / Ketik NIK Karyawan:", [""] + list(df_master["NIK"].unique()))
                 
-                # Auto-fill nama, bagian, shift berdasarkan NIK yang dipilih
                 nama_val, bagian_val, shift_val = "", "", ""
                 if nik_input:
                     match = df_master[df_master["NIK"] == nik_input]
@@ -255,13 +259,11 @@ elif menu_utama == "Panggilan Karyawan":
     
     df_rekap = load_panggilan_data()
     if not df_rekap.empty:
-        # Filter berdasarkan hak akses shift jika bukan admin
         if not st.session_state.is_admin:
             df_rekap = df_rekap[df_rekap["Shift"] == st.session_state.shift]
         
         st.dataframe(df_rekap, use_container_width=True)
         
-        # Fitur Download Rekap Data
         csv_rekap = df_rekap.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 Download Rekap Data (CSV)",

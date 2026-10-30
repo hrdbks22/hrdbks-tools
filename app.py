@@ -67,7 +67,12 @@ def init_db():
             now = datetime.now().isoformat(timespec="seconds")
             for username,nama,role,shift,_ in INITIAL_USERS:
                 bootstrap_password = str(bootstrap_users.get(username, "")).strip()
-                bootstrap_hash = password_hash(bootstrap_password) if bootstrap_password and not bootstrap_password.startswith("GANTI_") else None
+                if bootstrap_password and not bootstrap_password.startswith("GANTI_"):
+                    salt = os.urandom(16)
+                    digest = hashlib.pbkdf2_hmac("sha256", bootstrap_password.encode("utf-8"), salt, 310000)
+                    bootstrap_hash = salt.hex() + ":" + digest.hex()
+                else:
+                    bootstrap_hash = None
                 c.execute("""INSERT INTO users(username,nama,role,shift,require_password,password_hash,active,created_at,updated_at)
                              VALUES(?,?,?,?,1,?,1,?,?)
                              ON CONFLICT(username) DO UPDATE SET

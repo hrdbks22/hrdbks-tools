@@ -80,7 +80,7 @@ def receive_event(conn, event: dict[str, Any], *, receiver_node_id: str) -> str:
         """INSERT INTO sync_events
            (event_id,origin_node_id,entity_type,entity_key,operation,payload,
             base_version,entity_version,occurred_at,status)
-           VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,'pending')
+           VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,'applied')
            ON CONFLICT(event_id) DO NOTHING""",
         (event_id, source_node, event["entity_type"], event["entity_id"],
          event["operation"], json.dumps(event.get("payload") or {}, ensure_ascii=False),

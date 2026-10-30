@@ -57,12 +57,24 @@ def db():
 
 def init_db():
     if DATABASE_URL:
+        # Online accounts must always use passwords. Bootstrap passwords are supplied
+        # only through Streamlit Secrets and are stored as salted PBKDF2 hashes.
+        try:
+            bootstrap_users = st.secrets.get("users", {})
+        except Exception:
+            bootstrap_users = {}
         with db() as c:
             now = datetime.now().isoformat(timespec="seconds")
-            for username,nama,role,shift,require_password in INITIAL_USERS:
-                c.execute("""INSERT INTO users(username,nama,role,shift,require_password,active,created_at,updated_at)
-                             VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(username) DO NOTHING""",
-                          (username,nama,role,shift,require_password,now,now))
+            for username,nama,role,shift,_ in INITIAL_USERS:
+                bootstrap_password = str(bootstrap_users.get(username, "")).strip()
+                bootstrap_hash = password_hash(bootstrap_password) if bootstrap_password and not bootstrap_password.startswith("GANTI_") else None
+                c.execute("""INSERT INTO users(username,nama,role,shift,require_password,password_hash,active,created_at,updated_at)
+                             VALUES(?,?,?,?,1,?,1,?,?)
+                             ON CONFLICT(username) DO UPDATE SET
+                               require_password=1,
+                               password_hash=COALESCE(users.password_hash, EXCLUDED.password_hash),
+                               updated_at=EXCLUDED.updated_at""",
+                          (username,nama,role,shift,bootstrap_hash,now,now))
             defaults = {"Admin HRD": MENU_ITEMS, "Tally": ["Dashboard","Panggilan Karyawan"]}
             for role, menus_for_role in defaults.items():
                 for item in MENU_ITEMS:

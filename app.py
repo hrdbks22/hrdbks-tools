@@ -20,8 +20,13 @@ def init_db():
         c.executescript("""
         CREATE TABLE IF NOT EXISTS employees(
           nik TEXT PRIMARY KEY, nama TEXT NOT NULL, bagian TEXT, shift TEXT,
-          masuk TEXT, status TEXT, sumber TEXT, updated_at TEXT
+          masuk TEXT, keluar TEXT, status TEXT, sumber TEXT, updated_at TEXT
         );
+        """)
+        cols = {row[1] for row in c.execute("PRAGMA table_info(employees)").fetchall()}
+        if "keluar" not in cols:
+            c.execute("ALTER TABLE employees ADD COLUMN keluar TEXT")
+        c.executescript("""
         CREATE TABLE IF NOT EXISTS attendance(
           id INTEGER PRIMARY KEY AUTOINCREMENT, nik TEXT NOT NULL, tanggal TEXT NOT NULL,
           jenis TEXT NOT NULL CHECK(jenis IN ('Sakit','Izin','Alpa')), hari REAL NOT NULL DEFAULT 1,
@@ -148,9 +153,16 @@ if menu == "Dashboard":
     c2.metric("Data Absensi",len(at))
     c3.metric("Catatan SP",len(sp))
     c4.metric("Permintaan Tidak Lanjut",len(nr[nr.status!="Selesai"]) if len(nr) else 0)
-    st.subheader("Kontrak mendekati akhir")
+    st.subheader("Monitoring tanggal akhir kontrak")
     if len(em) and "keluar" in em.columns:
-        st.dataframe(em, use_container_width=True)
+        contracts=em.copy()
+        contracts["Tanggal Akhir"]=pd.to_datetime(contracts["keluar"],errors="coerce")
+        today=pd.Timestamp(date.today())
+        contracts["Sisa Hari"]=(contracts["Tanggal Akhir"]-today).dt.days
+        ending=contracts[contracts["Sisa Hari"].between(0,30)]
+        expired=contracts[contracts["Sisa Hari"]<0]
+        a,b=st.columns(2);a.metric("Berakhir 30 hari ke depan",len(ending));b.metric("Sudah lewat tanggal akhir",len(expired))
+        st.dataframe(contracts[contracts["Tanggal Akhir"].notna()][["nik","nama","bagian","shift","masuk","keluar","status","Sisa Hari"]].sort_values("Sisa Hari"),use_container_width=True)
     else:
         st.info("Tambahkan tanggal MASUK dan KELUAR melalui impor Master Data untuk memulai monitoring kontrak.")
     st.caption("Data dan keputusan HRD harus diverifikasi. Sistem tidak menetapkan keputusan perpanjangan atau pemutusan kontrak otomatis.")
@@ -189,13 +201,14 @@ elif menu == "Master Data Karyawan":
                         with db() as c:
                             for _,r in raw.iterrows():
                                 old=c.execute("SELECT nik FROM employees WHERE nik=?",(r.NIK,)).fetchone()
-                                c.execute("""INSERT INTO employees(nik,nama,bagian,shift,masuk,status,sumber,updated_at)
-                                VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(nik) DO UPDATE SET
+                                c.execute("""INSERT INTO employees(nik,nama,bagian,shift,masuk,keluar,status,sumber,updated_at)
+                                VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(nik) DO UPDATE SET
                                 nama=excluded.nama,bagian=excluded.bagian,shift=excluded.shift,
                                 masuk=CASE WHEN excluded.masuk='' THEN employees.masuk ELSE excluded.masuk END,
+                                keluar=CASE WHEN excluded.keluar='' THEN employees.keluar ELSE excluded.keluar END,
                                 status=CASE WHEN excluded.status='' THEN employees.status ELSE excluded.status END,
                                 sumber=excluded.sumber,updated_at=excluded.updated_at""",
-                                (r.NIK,r.NAMA,r.BAGIAN,r.SHIFT,r.MASUK,r.STATUS,up.name,datetime.now().isoformat(timespec="seconds")))
+                                (r.NIK,r.NAMA,r.BAGIAN,r.SHIFT,r.MASUK,r.KELUAR,r.STATUS,up.name,datetime.now().isoformat(timespec="seconds")))
                                 if old:nupd+=1
                                 else:nadd+=1
                             c.execute("INSERT INTO import_log(waktu,nama_file,jumlah_baris,ditambah,diperbarui,diabaikan,petugas) VALUES(?,?,?,?,?,?,?)",

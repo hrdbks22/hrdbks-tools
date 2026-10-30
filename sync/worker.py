@@ -38,6 +38,12 @@ def run_once() -> dict:
             raise
 
         acknowledge_events(conn, response.get("accepted", []) + response.get("duplicates", []))
+        conflicted = response.get("conflicts", [])
+        if conflicted:
+            conn.execute(
+                "UPDATE sync_events SET status='conflict',last_error='Remote node reported a version conflict' WHERE event_id=ANY(%s)",
+                (conflicted,),
+            )
         for event in response.get("events", []):
             receive_event(conn, event, receiver_node_id=node_id)
 

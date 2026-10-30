@@ -12,11 +12,31 @@ services:
       - "${POSTGRES_BIND:-127.0.0.1}:5432:5432"
     volumes:
       - hrd_postgres_data:/var/lib/postgresql/data
+      - ../migrations/postgres/001_sync_foundation.sql:/docker-entrypoint-initdb.d/001_sync_foundation.sql:ro
+      - ../migrations/postgres/002_sync_runtime.sql:/docker-entrypoint-initdb.d/002_sync_runtime.sql:ro
+      - ../migrations/postgres/003_sync_runtime_compat.sql:/docker-entrypoint-initdb.d/003_sync_runtime_compat.sql:ro
+      - ../migrations/postgres/004_hrd_business_schema.sql:/docker-entrypoint-initdb.d/004_hrd_business_schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hrd_admin} -d ${POSTGRES_DB:-hrd_tools}"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  hrd-app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: hrd-tools-app
+    restart: unless-stopped
+    depends_on:
+      hrd-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL using host hrd-db}
+      TZ: Asia/Jakarta
+    ports:
+      - "127.0.0.1:8501:8501"
+    command: ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
 
 volumes:
   hrd_postgres_data:

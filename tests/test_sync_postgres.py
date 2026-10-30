@@ -25,10 +25,10 @@ class SyncPostgresIntegrationTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         with connect(cls.dsn) as conn:
-            conn.execute("DELETE FROM sync_events WHERE origin_node_id = ANY(%s)", ([cls.node_a, cls.node_b],))
-            conn.execute("DELETE FROM sync_inbox WHERE source_node_id = ANY(%s)", ([cls.node_a, cls.node_b],))
-            conn.execute("DELETE FROM sync_entity_state WHERE entity_key LIKE 'test:%'")
             conn.execute("DELETE FROM sync_conflicts WHERE entity_key LIKE 'test:%'")
+            conn.execute("DELETE FROM sync_inbox WHERE source_node_id = ANY(%s)", ([cls.node_a, cls.node_b],))
+            conn.execute("DELETE FROM sync_events WHERE origin_node_id = ANY(%s)", ([cls.node_a, cls.node_b],))
+            conn.execute("DELETE FROM sync_entity_state WHERE entity_key LIKE 'test:%'")
             conn.execute("DELETE FROM sync_nodes WHERE node_id = ANY(%s)", ([cls.node_a, cls.node_b],))
 
     def test_outbox_delivery_is_idempotent(self):

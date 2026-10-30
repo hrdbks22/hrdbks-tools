@@ -32,7 +32,7 @@ services:
       hrd-db:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL using host hrd-db}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:?Set APP_DATABASE_URL using host hrd-db}
       TZ: Asia/Jakarta
     ports:
       - "127.0.0.1:8501:8501"

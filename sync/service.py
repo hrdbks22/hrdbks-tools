@@ -37,7 +37,22 @@ def exchange(body: ExchangeRequest, authorization: str | None = Header(default=N
         raise HTTPException(status_code=413, detail="Too many events")
     accepted, conflicts, duplicates = [], [], []
     with connect(DSN) as conn:
+        try:
+            peer_uuid = str(__import__("uuid").UUID(body.node_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid node UUID") from exc
+        peer = conn.execute("SELECT node_id FROM sync_nodes WHERE node_id=%s", (peer_uuid,)).fetchone()
+        if not peer:
+            raise HTTPException(status_code=403, detail="Node is not registered")
         for event in body.events:
+            if not isinstance(event, dict):
+                raise HTTPException(status_code=422, detail="Each event must be an object")
+            if str(event.get("node_id", "")) != peer_uuid:
+                raise HTTPException(status_code=403, detail="Event origin does not match authenticated peer")
+            required = {"event_id", "node_id", "entity_type", "entity_id",
+                        "operation", "payload", "base_version", "entity_version"}
+            if not required.issubset(event):
+                raise HTTPException(status_code=422, detail="Event is missing required fields")
             try:
                 result = receive_event(conn, event, receiver_node_id=NODE_ID)
             except (KeyError, ValueError, TypeError) as exc:

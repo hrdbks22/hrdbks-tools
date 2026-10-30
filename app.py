@@ -13,7 +13,7 @@ from dateutil.relativedelta import relativedelta
 
 st.set_page_config(page_title="HRD Tools | PT. Berkat Karunia Surya", page_icon="📋", layout="wide")
 DB = "hrd_tools.db"
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+DATABASE_URL = os.environ.get("APP_DATABASE_URL", os.environ.get("DATABASE_URL", "")).strip()
 
 class PostgresCompat:
     """Connection wrapper retaining the app's positional ? placeholders."""

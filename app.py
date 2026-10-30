@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import re
+import psycopg
+from psycopg.rows import tuple_row
 import io
 import hashlib
 import hmac
@@ -10,6 +13,29 @@ from dateutil.relativedelta import relativedelta
 
 st.set_page_config(page_title="HRD Tools | PT. Berkat Karunia Surya", page_icon="📋", layout="wide")
 DB = "hrd_tools.db"
+try:
+    STREAMLIT_DATABASE_URL = str(st.secrets.get("DATABASE_URL", "")).strip()
+except Exception:
+    STREAMLIT_DATABASE_URL = ""
+DATABASE_URL = (os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL") or STREAMLIT_DATABASE_URL).strip()
+
+class PostgresCompat:
+    """Connection wrapper retaining the app's positional ? placeholders."""
+    def __init__(self, dsn):
+        self.conn = psycopg.connect(dsn, row_factory=tuple_row)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.conn.commit() if exc_type is None else self.conn.rollback()
+        finally:
+            self.conn.close()
+
+    def execute(self, sql, params=()):
+        return self.conn.execute(sql.replace("?", "%s"), params)
+
 MENU_ITEMS = ["Dashboard","Master Data Karyawan","Data Absensi","Arsip & Monitoring SP","Evaluasi Karyawan (H3)","Daftar Karyawan Tidak Lanjut Kontrak","Panggilan Karyawan","Riwayat Karyawan"]
 ROLE_NAMES = ["Super Admin","Admin HRD","Tally"]
 INITIAL_USERS = [
@@ -25,9 +51,25 @@ ACTIVE_STATUSES = {"S3", "S4"}
 MILESTONES = [1, 2, 3, 6, 9, 12]
 
 def db():
+    if DATABASE_URL:
+        return PostgresCompat(DATABASE_URL)
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
+    if DATABASE_URL:
+        with db() as c:
+            now = datetime.now().isoformat(timespec="seconds")
+            for username,nama,role,shift,require_password in INITIAL_USERS:
+                c.execute("""INSERT INTO users(username,nama,role,shift,require_password,active,created_at,updated_at)
+                             VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(username) DO NOTHING""",
+                          (username,nama,role,shift,require_password,now,now))
+            defaults = {"Admin HRD": MENU_ITEMS, "Tally": ["Dashboard","Panggilan Karyawan"]}
+            for role, menus_for_role in defaults.items():
+                for item in MENU_ITEMS:
+                    c.execute("""INSERT INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)
+                                 ON CONFLICT(role,menu) DO NOTHING""",
+                              (role,item,1 if item in menus_for_role else 0))
+        return
     with db() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS users(
@@ -111,12 +153,19 @@ def get_user(username):
 def allowed_menus(role):
     if role == "Super Admin": return MENU_ITEMS + ["Pengaturan Username","Pengaturan Hak Akses Menu"]
     with db() as c:
-        rows = c.execute("SELECT menu FROM menu_permissions WHERE role=? AND allowed=1 ORDER BY rowid",(role,)).fetchall()
+        rows = c.execute("SELECT menu FROM menu_permissions WHERE role=? AND allowed=1 ORDER BY menu",(role,)).fetchall()
     return [r[0] for r in rows if r[0] in MENU_ITEMS]
 
 def read_table(name):
+    allowed = {"users","menu_permissions","employees","attendance","warnings",
+               "evaluations","nonrenew_requests","calls","import_log"}
+    if name not in allowed:
+        raise ValueError("Tabel tidak diizinkan")
     with db() as c:
-        return pd.read_sql_query(f"SELECT * FROM {name}", c)
+        cur = c.execute(f"SELECT * FROM {name}")
+        rows = cur.fetchall()
+        columns = [d.name if hasattr(d, "name") else d[0] for d in cur.description]
+        return pd.DataFrame(rows, columns=columns)
 
 def employee(nik):
     with db() as c:
@@ -225,7 +274,7 @@ if menu == "Pengaturan Username" and is_super_admin:
                                  VALUES(?,?,?,?,?,?,1,?,?)""",
                               (new_username,new_name,new_role,new_shift,int(new_requires),password_hash(new_password) if new_requires else None,datetime.now().isoformat(),datetime.now().isoformat()))
                     st.success("Akun berhasil ditambahkan."); st.rerun()
-                except sqlite3.IntegrityError: st.error("Username sudah terdaftar.")
+                except (sqlite3.IntegrityError, psycopg.IntegrityError): st.error("Username sudah terdaftar.")
     st.markdown("**Ubah akun yang sudah terdaftar**")
     choices = accounts_df.username.tolist() if len(accounts_df) else []
     if choices:

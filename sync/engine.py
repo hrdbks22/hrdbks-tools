@@ -74,6 +74,20 @@ def receive_event(conn, event: dict[str, Any], *, receiver_node_id: str) -> str:
     if not inserted:
         return "duplicate"
 
+    # Persist the original immutable event in this node's outbox so it can be
+    # relayed onward to other peers after local application.
+    conn.execute(
+        """INSERT INTO sync_events
+           (event_id,origin_node_id,entity_type,entity_key,operation,payload,
+            base_version,entity_version,occurred_at,status)
+           VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,'applied')
+           ON CONFLICT(event_id) DO NOTHING""",
+        (event_id, source_node, event["entity_type"], event["entity_id"],
+         event["operation"], json.dumps(event.get("payload") or {}, ensure_ascii=False),
+         int(event["base_version"]), int(event["entity_version"]),
+         event.get("created_at") or event.get("occurred_at")),
+    )
+
     current = conn.execute(
         """SELECT version,payload FROM sync_entity_state
            WHERE entity_type=%s AND entity_key=%s FOR UPDATE""",

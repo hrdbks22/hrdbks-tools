@@ -82,10 +82,11 @@ def init_db():
                           (username,nama,role,shift,bootstrap_hash,now,now))
             defaults = {"Admin HRD": MENU_ITEMS, "Tally": ["Dashboard","Panggilan Karyawan"]}
             for role, menus_for_role in defaults.items():
-                for item in MENU_ITEMS:
-                    c.execute("""INSERT INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)
-                                 ON CONFLICT(role,menu) DO NOTHING""",
-                              (role,item,1 if item in menus_for_role else 0))
+                existing = c.execute("SELECT COUNT(*) FROM menu_permissions WHERE role=?", (role,)).fetchone()[0]
+                if existing == 0:
+                    for item in MENU_ITEMS:
+                        c.execute("INSERT INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)",
+                                  (role,item,1 if item in menus_for_role else 0))
         return
     with db() as c:
         c.executescript("""
@@ -146,9 +147,11 @@ def init_db():
                          VALUES(?,?,?,?,?,1,?,?)""",(username,nama,role,shift,require_password,now,now))
         defaults = {"Admin HRD": MENU_ITEMS, "Tally": ["Dashboard","Panggilan Karyawan"]}
         for role, menus_for_role in defaults.items():
-            for item in MENU_ITEMS:
-                c.execute("INSERT OR IGNORE INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)",
-                          (role,item,1 if item in menus_for_role else 0))
+            existing = c.execute("SELECT COUNT(*) FROM menu_permissions WHERE role=?", (role,)).fetchone()[0]
+            if existing == 0:
+                for item in MENU_ITEMS:
+                    c.execute("INSERT INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)",
+                              (role,item,1 if item in menus_for_role else 0))
 init_db()
 
 def password_hash(password, salt=None):

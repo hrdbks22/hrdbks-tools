@@ -66,6 +66,12 @@ def record_sync_error(conn, event_ids: list[str], error: str) -> None:
 def receive_event(conn, event: dict[str, Any], *, receiver_node_id: str) -> str:
     event_id = str(uuid.UUID(str(event["event_id"])))
     source_node = str(uuid.UUID(str(event["node_id"])))
+    # Verify that the event origin is a registered node before accepting it.
+    registered = conn.execute(
+        "SELECT node_id FROM sync_nodes WHERE node_id=%s", (source_node,)
+    ).fetchone()
+    if not registered:
+        raise ValueError("Unregistered event origin node")
     inserted = conn.execute(
         """INSERT INTO sync_inbox(event_id,source_node_id,received_at)
            VALUES (%s,%s,now()) ON CONFLICT(event_id) DO NOTHING RETURNING event_id""",

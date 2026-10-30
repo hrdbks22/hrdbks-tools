@@ -1,0 +1,11 @@
+[Unit]
+Description=HRD Tools sync worker (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hrdtools
+WorkingDirectory=/opt/hrd-tools
+EnvironmentFile=/opt/hrd-tools/deploy/.env
+ExecStart=/opt/hrd-tools/.venv/bin/python -m sync.worker

@@ -1,0 +1,23 @@
+# Example Nginx site for the office LAN.
+# Replace 192.168.10.0/24 with the actual office subnet discovered on the server.
+# Enforce this at the reverse proxy/firewall layer; do not trust a client-supplied
+# X-Forwarded-For header in the Streamlit application.
+server {
+    listen 80;
+    server_name hrd-tools.lan;
+
+    # Only explicitly registered office networks may access the application.
+    allow 192.168.10.0/24;
+    deny all;
+
+    location / {
+        proxy_pass http://127.0.0.1:8501;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+        proxy_buffering off;
+    }
+}

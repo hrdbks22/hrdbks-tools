@@ -2,13 +2,25 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import io
+import hashlib
+import hmac
+import os
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 
 st.set_page_config(page_title="HRD Tools | PT. Berkat Karunia Surya", page_icon="📋", layout="wide")
 DB = "hrd_tools.db"
-ADMIN_USERS = {"agung", "niko", "iis", "nurhayat"}
-TALLY_USERS = {"23010202": "E", "26090328": "F", "26092377": "G"}
+MENU_ITEMS = ["Dashboard","Master Data Karyawan","Data Absensi","Arsip & Monitoring SP","Evaluasi Karyawan (H3)","Daftar Karyawan Tidak Lanjut Kontrak","Panggilan Karyawan","Riwayat Karyawan"]
+ROLE_NAMES = ["Super Admin","Admin HRD","Tally"]
+INITIAL_USERS = [
+    ("niko","Niko","Super Admin","",0),
+    ("agung","Agung","Admin HRD","",0),
+    ("iis","Iis","Admin HRD","",0),
+    ("nurhayat","Nurhayat","Admin HRD","",1),
+    ("23010202","Tally Shift E","Tally","E",0),
+    ("26090328","Tally Shift F","Tally","F",0),
+    ("26092377","Tally Shift G","Tally","G",0),
+]
 ACTIVE_STATUSES = {"S3", "S4"}
 MILESTONES = [1, 2, 3, 6, 9, 12]
 
@@ -18,6 +30,16 @@ def db():
 def init_db():
     with db() as c:
         c.executescript("""
+        CREATE TABLE IF NOT EXISTS users(
+          username TEXT PRIMARY KEY, nama TEXT NOT NULL, role TEXT NOT NULL,
+          shift TEXT, require_password INTEGER NOT NULL DEFAULT 0,
+          password_hash TEXT, active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT, updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS menu_permissions(
+          role TEXT NOT NULL, menu TEXT NOT NULL, allowed INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(role,menu)
+        );
         CREATE TABLE IF NOT EXISTS employees(
           nik TEXT PRIMARY KEY, nama TEXT NOT NULL, bagian TEXT, shift TEXT,
           masuk TEXT, keluar TEXT, status TEXT, sumber TEXT, updated_at TEXT
@@ -58,7 +80,39 @@ def init_db():
           jumlah_baris INTEGER, ditambah INTEGER, diperbarui INTEGER, diabaikan INTEGER, petugas TEXT
         );
         """)
+    with db() as c:
+        now = datetime.now().isoformat(timespec="seconds")
+        for username,nama,role,shift,require_password in INITIAL_USERS:
+            c.execute("""INSERT OR IGNORE INTO users(username,nama,role,shift,require_password,active,created_at,updated_at)
+                         VALUES(?,?,?,?,?,1,?,?)""",(username,nama,role,shift,require_password,now,now))
+        defaults = {"Admin HRD": MENU_ITEMS, "Tally": ["Dashboard","Panggilan Karyawan"]}
+        for role, menus_for_role in defaults.items():
+            for item in MENU_ITEMS:
+                c.execute("INSERT OR IGNORE INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)",
+                          (role,item,1 if item in menus_for_role else 0))
 init_db()
+
+def password_hash(password, salt=None):
+    salt = salt or os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 310000)
+    return salt.hex() + ":" + digest.hex()
+
+def verify_password(password, stored):
+    if not stored or ":" not in stored: return False
+    salt_hex, digest_hex = stored.split(":",1)
+    candidate = password_hash(password, bytes.fromhex(salt_hex)).split(":",1)[1]
+    return hmac.compare_digest(candidate,digest_hex)
+
+def get_user(username):
+    with db() as c:
+        return c.execute("SELECT username,nama,role,shift,require_password,password_hash,active FROM users WHERE username=?",
+                         (str(username).strip().lower(),)).fetchone()
+
+def allowed_menus(role):
+    if role == "Super Admin": return MENU_ITEMS + ["Pengaturan Username","Pengaturan Hak Akses Menu"]
+    with db() as c:
+        rows = c.execute("SELECT menu FROM menu_permissions WHERE role=? AND allowed=1 ORDER BY rowid",(role,)).fetchall()
+    return [r[0] for r in rows if r[0] in MENU_ITEMS]
 
 def read_table(name):
     with db() as c:
@@ -104,37 +158,41 @@ def score_employee(nik, milestone, asof):
             "sp1":sanctions.get("SP1",0),"sp2":sanctions.get("SP2",0),"sp3":sanctions.get("SP3",0),
             "skor":score,"detail":detail,"milestone":milestone}
 
-# Login: akun dan password wajib disiapkan di Streamlit Secrets.
+# Login berbasis akun lokal; password bersifat opsional per akun.
 if "user" not in st.session_state: st.session_state.user = None
 if not st.session_state.user:
     st.title("🔐 HRD Tools")
     st.caption("PT. BERKAT KARUNIA SURYA")
-    st.info("Akses memerlukan konfigurasi [users] di Streamlit Secrets. Username saja tidak lagi cukup untuk melindungi data karyawan.")
-    try: users = dict(st.secrets["users"])
-    except Exception: users = {}
-    if not users:
-        st.error("Belum ada akun. Tambahkan username dan password pada Streamlit Secrets sebelum aplikasi digunakan.")
-        st.stop()
-    with st.form("login"):
-        u = st.text_input("Username").strip().lower()
-        p = st.text_input("Password", type="password")
-        ok = st.form_submit_button("Masuk", type="primary")
-    if ok:
-        if u in users and str(users[u]) == p:
-            st.session_state.user = u
+    username = st.text_input("Username / NIK", key="login_username").strip().lower()
+    account = get_user(username) if username else None
+    password = ""
+    if account and account[6] == 1 and account[4] == 1:
+        password = st.text_input("Password", type="password", key="login_password")
+    if st.button("Masuk",type="primary"):
+        account = get_user(username)
+        if not account or account[6] != 1:
+            st.error("Akun tidak ditemukan atau sudah nonaktif.")
+        elif account[4] == 1 and (not account[5] or not password or not verify_password(password,account[5])):
+            st.error("Password belum disiapkan atau password salah. Hubungi Super Admin.")
+        else:
+            st.session_state.user = account[0]
             st.rerun()
-        else: st.error("Username atau password salah.")
     st.stop()
 
 user = st.session_state.user
-is_admin = user in ADMIN_USERS
+account = get_user(user)
+if not account or account[6] != 1:
+    st.session_state.user = None
+    st.error("Akun tidak aktif atau tidak ditemukan.")
+    st.stop()
+user_role = account[2]
+is_super_admin = user_role == "Super Admin"
+is_admin = user_role in ("Super Admin","Admin HRD")
 st.sidebar.title("HRD Tools")
-st.sidebar.caption(f"Login: {user.upper()} · {'Admin' if is_admin else 'User'}")
-menus = ["Dashboard", "Panggilan Karyawan"]
-if is_admin:
-    menus = ["Dashboard","Master Data Karyawan","Data Absensi","Arsip & Monitoring SP",
-             "Evaluasi Karyawan (H3)","Daftar Karyawan Tidak Lanjut Kontrak",
-             "Panggilan Karyawan","Riwayat Karyawan"]
+st.sidebar.caption(f"Login: {account[1]} · {user_role}")
+menus = allowed_menus(user_role)
+if is_super_admin:
+    menus = menus + ["Pengaturan Username","Pengaturan Hak Akses Menu"]
 menu = st.sidebar.radio("Menu", menus)
 if st.sidebar.button("Logout"):
     st.session_state.user = None
@@ -143,7 +201,72 @@ if st.sidebar.button("Logout"):
 st.title("PT. BERKAT KARUNIA SURYA")
 st.caption("Sistem Administrasi Human Resources")
 
-if menu == "Dashboard":
+if menu == "Pengaturan Username" and is_super_admin:
+    st.subheader("Pengaturan Username")
+    st.caption("Password disimpan sebagai hash dan tidak dapat dibaca kembali.")
+    accounts_df = read_table("users")
+    st.dataframe(accounts_df.drop(columns=["password_hash"],errors="ignore"),use_container_width=True)
+    with st.form("account_add"):
+        st.markdown("**Tambah akun**")
+        new_username = st.text_input("Username / NIK").strip().lower()
+        new_name = st.text_input("Nama pengguna")
+        new_role = st.selectbox("Role",ROLE_NAMES[1:])
+        new_shift = st.selectbox("Shift",["","E","F","G"]) if new_role=="Tally" else ""
+        new_requires = st.checkbox("Wajib menggunakan password")
+        new_password = st.text_input("Password baru",type="password") if new_requires else ""
+        add_account = st.form_submit_button("Tambah akun")
+    if add_account:
+        if not new_username or not new_name: st.error("Username dan nama pengguna wajib diisi.")
+        elif new_requires and not new_password: st.error("Password wajib dibuat jika checkbox dicentang.")
+        else:
+            with db() as c:
+                try:
+                    c.execute("""INSERT INTO users(username,nama,role,shift,require_password,password_hash,active,created_at,updated_at)
+                                 VALUES(?,?,?,?,?,?,1,?,?)""",
+                              (new_username,new_name,new_role,new_shift,int(new_requires),password_hash(new_password) if new_requires else None,datetime.now().isoformat(),datetime.now().isoformat()))
+                    st.success("Akun berhasil ditambahkan."); st.rerun()
+                except sqlite3.IntegrityError: st.error("Username sudah terdaftar.")
+    st.markdown("**Ubah akun yang sudah terdaftar**")
+    choices = accounts_df.username.tolist() if len(accounts_df) else []
+    if choices:
+        selected = st.selectbox("Pilih akun",choices)
+        selected_row = get_user(selected)
+        with st.form("account_edit"):
+            edit_name = st.text_input("Nama",value=selected_row[1])
+            edit_role = st.selectbox("Role",ROLE_NAMES,index=ROLE_NAMES.index(selected_row[2]))
+            edit_shift = st.selectbox("Shift",["","E","F","G"],index=["","E","F","G"].index(selected_row[3] or "")) if edit_role=="Tally" else ""
+            edit_active = st.checkbox("Akun aktif",value=bool(selected_row[6]))
+            edit_requires = st.checkbox("Wajib menggunakan password",value=bool(selected_row[4]))
+            edit_password = st.text_input("Password baru (kosongkan jika tidak ingin mengganti)",type="password")
+            save_account = st.form_submit_button("Simpan perubahan")
+        if save_account:
+            if selected=="niko" and (edit_role!="Super Admin" or not edit_active):
+                st.error("Akun Niko sebagai Super Admin tidak boleh dinonaktifkan atau diturunkan role-nya.")
+            elif edit_requires and not (edit_password or selected_row[5]):
+                st.error("Buat password terlebih dahulu sebelum mewajibkan password.")
+            else:
+                new_hash = password_hash(edit_password) if edit_password else selected_row[5]
+                if not edit_requires: new_hash = None
+                with db() as c:
+                    c.execute("""UPDATE users SET nama=?,role=?,shift=?,active=?,require_password=?,password_hash=?,updated_at=? WHERE username=?""",
+                              (edit_name,edit_role,edit_shift,int(edit_active),int(edit_requires),new_hash,datetime.now().isoformat(),selected))
+                st.success("Pengaturan akun diperbarui."); st.rerun()
+
+elif menu == "Pengaturan Hak Akses Menu" and is_super_admin:
+    st.subheader("Pengaturan Hak Akses Menu")
+    st.caption("Super Admin selalu memiliki akses penuh. Pilih menu yang boleh dibuka oleh masing-masing role.")
+    for role in ["Admin HRD","Tally"]:
+        with db() as c:
+            current = [r[0] for r in c.execute("SELECT menu FROM menu_permissions WHERE role=? AND allowed=1",(role,)).fetchall()]
+        chosen = st.multiselect(f"Menu yang dapat diakses — {role}",MENU_ITEMS,default=current,key=f"perm_{role}")
+        if st.button(f"Simpan hak akses {role}",key=f"save_perm_{role}"):
+            with db() as c:
+                c.execute("DELETE FROM menu_permissions WHERE role=?",(role,))
+                for item in MENU_ITEMS:
+                    c.execute("INSERT INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)",(role,item,int(item in chosen)))
+            st.success(f"Hak akses {role} berhasil diperbarui."); st.rerun()
+
+elif menu == "Dashboard":
     em = read_table("employees")
     at = read_table("attendance")
     sp = read_table("warnings")
@@ -167,7 +290,7 @@ if menu == "Dashboard":
         st.info("Tambahkan tanggal MASUK dan KELUAR melalui impor Master Data untuk memulai monitoring kontrak.")
     st.caption("Data dan keputusan HRD harus diverifikasi. Sistem tidak menetapkan keputusan perpanjangan atau pemutusan kontrak otomatis.")
 
-elif menu == "Master Data Karyawan":
+elif menu == "Master Data Karyawan" and menu in menus:
     st.subheader("Master Data Karyawan")
     st.warning("Impor menggunakan NIK sebagai kunci. Data yang tidak ada di file baru tidak dihapus; perubahan diperbarui setelah pratinjau.")
     template = pd.DataFrame(columns=["NIK","NAMA","BAGIAN","SHIFT","MASUK","KELUAR","STATUS"])
@@ -221,7 +344,7 @@ elif menu == "Master Data Karyawan":
     st.dataframe(em,use_container_width=True)
     if len(em): st.download_button("Export Master Data Excel",xlsx_bytes(em),"master_karyawan.xlsx")
 
-elif menu == "Data Absensi":
+elif menu == "Data Absensi" and menu in menus:
     st.subheader("Pencatatan Sakit, Izin, dan Alpa")
     em=read_table("employees")
     if em.empty: st.warning("Isi Master Data terlebih dahulu.")
@@ -239,7 +362,7 @@ elif menu == "Data Absensi":
     data=read_table("attendance"); st.dataframe(data,use_container_width=True)
     if len(data):st.download_button("Unduh Excel",xlsx_bytes(data),"data_absensi.xlsx")
 
-elif menu == "Arsip & Monitoring SP":
+elif menu == "Arsip & Monitoring SP" and menu in menus:
     st.subheader("Arsip Surat Peringatan")
     em=read_table("employees")
     if len(em):
@@ -256,7 +379,7 @@ elif menu == "Arsip & Monitoring SP":
     data=read_table("warnings");st.dataframe(data,use_container_width=True)
     if len(data):st.download_button("Unduh Excel",xlsx_bytes(data),"arsip_sp.xlsx")
 
-elif menu == "Evaluasi Karyawan (H3)":
+elif menu == "Evaluasi Karyawan (H3)" and menu in menus:
     st.subheader("Evaluasi Karyawan H3")
     st.caption("Hanya karyawan berstatus H3. Pastikan STATUS dan MASUK terisi benar pada Master Data.")
     em=read_table("employees")
@@ -298,7 +421,7 @@ elif menu == "Evaluasi Karyawan (H3)":
     st.subheader("Riwayat evaluasi")
     st.dataframe(hist,use_container_width=True)
 
-elif menu == "Daftar Karyawan Tidak Lanjut Kontrak":
+elif menu == "Daftar Karyawan Tidak Lanjut Kontrak" and menu in menus:
     st.subheader("Permintaan Karyawan Tidak Lanjut Kontrak")
     em=read_table("employees")
     if em.empty: st.warning("Master Data belum tersedia.")
@@ -331,7 +454,7 @@ elif menu == "Daftar Karyawan Tidak Lanjut Kontrak":
         st.download_button("Unduh daftar Excel",xlsx_bytes(req),"daftar_tidak_lanjut_kontrak.xlsx")
     else: st.info("Belum ada permintaan.")
 
-elif menu == "Panggilan Karyawan":
+elif menu == "Panggilan Karyawan" and menu in menus:
     st.subheader("Pencatatan Panggilan Karyawan")
     em=read_table("employees")
     if len(em):
@@ -348,7 +471,7 @@ elif menu == "Panggilan Karyawan":
     calls=read_table("calls");st.dataframe(calls,use_container_width=True)
     if len(calls):st.download_button("Unduh Excel",xlsx_bytes(calls),"riwayat_panggilan.xlsx")
 
-elif menu == "Riwayat Karyawan":
+elif menu == "Riwayat Karyawan" and menu in menus:
     st.subheader("Riwayat Karyawan")
     em=read_table("employees")
     if len(em):

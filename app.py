@@ -30,7 +30,7 @@ class PostgresCompat:
             self.conn.close()
 
     def execute(self, sql, params=()):
-        return self.conn.execute(re.sub(r"\\?", "%s", sql), params)
+        return self.conn.execute(sql.replace("?", "%s"), params)
 
 MENU_ITEMS = ["Dashboard","Master Data Karyawan","Data Absensi","Arsip & Monitoring SP","Evaluasi Karyawan (H3)","Daftar Karyawan Tidak Lanjut Kontrak","Panggilan Karyawan","Riwayat Karyawan"]
 ROLE_NAMES = ["Super Admin","Admin HRD","Tally"]

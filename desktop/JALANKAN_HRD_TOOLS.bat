@@ -7,37 +7,63 @@ echo ==========================================
 echo   HRD TOOLS - PT. BERKAT KARUNIA SURYA
 echo ==========================================
 echo.
-echo Aplikasi akan menggunakan lingkungan Python khusus di folder .venv.
-echo Pustaka HRD Tools tidak akan dipasang ke Python global komputer.
+echo HRD Tools akan memakai Python 3.12 dan lingkungan .venv.
+echo Pustaka aplikasi dipasang terpisah, tidak ke Python global.
 echo.
 
+set "PYTHON_EXE="
 set "PYTHON_LAUNCHER="
+
+REM Cari Python 3.12 yang sudah terpasang.
 where py >nul 2>nul
-if not errorlevel 1 set "PYTHON_LAUNCHER=py -3"
-
-if not defined PYTHON_LAUNCHER (
-    where python >nul 2>nul
-    if not errorlevel 1 set "PYTHON_LAUNCHER=python"
+if not errorlevel 1 (
+    py -3.12 --version >nul 2>nul
+    if not errorlevel 1 set "PYTHON_LAUNCHER=py -3.12"
 )
 
+REM Jika belum ada, coba lokasi instalasi per-user yang umum.
 if not defined PYTHON_LAUNCHER (
-    echo [GAGAL] Python 3 belum ditemukan.
-    echo Instal Python 3.10 atau lebih baru dari:
-    echo https://www.python.org/downloads/
-    echo Saat instalasi, pastikan Tcl/Tk dan pip ikut dipasang.
-    echo Setelah itu jalankan BAT ini kembali.
-    pause
-    exit /b 1
+    if exist "%LocalAppData%\Programs\Python\Python312\python.exe" (
+        set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python312\python.exe"
+    )
 )
 
+REM Jika Python 3.12 belum ada, pasang otomatis melalui Windows Package Manager.
+if not defined PYTHON_LAUNCHER if not defined PYTHON_EXE (
+    echo Python 3.12 belum ditemukan.
+    where winget >nul 2>nul
+    if errorlevel 1 goto no_winget
+
+    echo.
+    echo Mengunduh dan memasang Python 3.12 64-bit untuk akun Windows ini...
+    echo Mohon tunggu. Komputer harus terhubung ke internet.
+    winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 goto install_error
+
+    if exist "%LocalAppData%\Programs\Python\Python312\python.exe" (
+        set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python312\python.exe"
+    )
+)
+
+if not defined PYTHON_LAUNCHER if not defined PYTHON_EXE goto install_error
+
+echo.
 echo [1/3] Memeriksa Python...
-%PYTHON_LAUNCHER% --version
+if defined PYTHON_LAUNCHER (
+    %PYTHON_LAUNCHER% --version
+) else (
+    "%PYTHON_EXE%" --version
+)
 if errorlevel 1 goto python_error
 
 if not exist ".venv\Scripts\python.exe" (
     echo.
     echo [2/3] Membuat lingkungan Python khusus aplikasi...
-    %PYTHON_LAUNCHER% -m venv .venv
+    if defined PYTHON_LAUNCHER (
+        %PYTHON_LAUNCHER% -m venv .venv
+    ) else (
+        "%PYTHON_EXE%" -m venv .venv
+    )
     if errorlevel 1 goto venv_error
 ) else (
     echo.
@@ -57,20 +83,34 @@ if errorlevel 1 (
     echo [GAGAL] Aplikasi berhenti karena terjadi kesalahan.
     echo Periksa file hrd_tools_error.log jika tersedia.
 )
-
 echo.
 echo Selesai.
 pause
 exit /b 0
 
+:no_winget
+echo [GAGAL] Python 3.12 belum ada dan winget tidak ditemukan.
+echo Pasang Python 3.12 dari https://www.python.org/downloads/release/python-31210/
+echo atau perbarui App Installer dari Microsoft Store, lalu ulangi.
+pause
+exit /b 1
+
+:install_error
+echo [GAGAL] Python 3.12 tidak berhasil dipasang atau tidak ditemukan.
+echo Pastikan internet aktif dan Windows mendukung winget.
+echo Anda dapat memasang Python 3.12 dari:
+echo https://www.python.org/downloads/release/python-31210/
+pause
+exit /b 1
+
 :python_error
-echo [GAGAL] Python tidak dapat dijalankan. Periksa instalasi Python.
+echo [GAGAL] Python tidak dapat dijalankan.
 pause
 exit /b 1
 
 :venv_error
 echo [GAGAL] Lingkungan Python khusus tidak berhasil dibuat.
-echo Pastikan modul venv tersedia pada instalasi Python.
+echo Pastikan instalasi Python menyertakan pip dan venv.
 pause
 exit /b 1
 

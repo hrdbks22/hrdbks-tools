@@ -6,6 +6,7 @@ import psycopg
 from psycopg.rows import tuple_row
 import io
 import hashlib
+import json
 import hmac
 import os
 from datetime import date, datetime
@@ -81,9 +82,17 @@ def init_db():
         # Online accounts must always use passwords. Bootstrap passwords are supplied
         # only through Streamlit Secrets and are stored as salted PBKDF2 hashes.
         try:
-            bootstrap_users = st.secrets.get("users", {})
+            bootstrap_users = dict(st.secrets.get("users", {}))
         except Exception:
             bootstrap_users = {}
+        # Cloud Run can supply bootstrap credentials through Secret Manager.
+        # The JSON secret should map each seeded username to a unique password.
+        try:
+            cloud_bootstrap_users = json.loads(os.environ.get("BOOTSTRAP_USERS_JSON", "{}"))
+            if isinstance(cloud_bootstrap_users, dict):
+                bootstrap_users.update(cloud_bootstrap_users)
+        except (TypeError, ValueError):
+            cloud_bootstrap_users = {}
         with db() as c:
             now = datetime.now().isoformat(timespec="seconds")
             for username,nama,role,shift,_ in INITIAL_USERS:

@@ -13,11 +13,32 @@ from dateutil.relativedelta import relativedelta
 
 st.set_page_config(page_title="HRD Tools | PT. Berkat Karunia Surya", page_icon="📋", layout="wide")
 DB = "hrd_tools.db"
-try:
-    STREAMLIT_DATABASE_URL = str(st.secrets.get("DATABASE_URL", "")).strip()
-except Exception:
-    STREAMLIT_DATABASE_URL = ""
-DATABASE_URL = (os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL") or STREAMLIT_DATABASE_URL).strip()
+
+# Cloud Run + Cloud SQL (PostgreSQL) uses the Cloud SQL Unix socket.
+# Credentials are injected as environment variables / Secret Manager secrets.
+CLOUD_SQL_INSTANCE = os.environ.get("INSTANCE_CONNECTION_NAME", "").strip()
+CLOUD_SQL_DB = os.environ.get("DB_NAME", "").strip()
+CLOUD_SQL_USER = os.environ.get("DB_USER", "").strip()
+CLOUD_SQL_PASSWORD = os.environ.get("DB_PASS", "")
+
+if CLOUD_SQL_INSTANCE and CLOUD_SQL_DB and CLOUD_SQL_USER and CLOUD_SQL_PASSWORD:
+    DATABASE_URL = psycopg.conninfo.make_conninfo(
+        host=f"/cloudsql/{CLOUD_SQL_INSTANCE}",
+        dbname=CLOUD_SQL_DB,
+        user=CLOUD_SQL_USER,
+        password=CLOUD_SQL_PASSWORD,
+        connect_timeout=10,
+    )
+else:
+    try:
+        STREAMLIT_DATABASE_URL = str(st.secrets.get("DATABASE_URL", "")).strip()
+    except Exception:
+        STREAMLIT_DATABASE_URL = ""
+    DATABASE_URL = (
+        os.environ.get("APP_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or STREAMLIT_DATABASE_URL
+    ).strip()
 
 class PostgresCompat:
     """Connection wrapper retaining the app's positional ? placeholders."""

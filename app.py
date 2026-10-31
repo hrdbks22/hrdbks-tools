@@ -31,8 +31,6 @@ ACTIVE_STATUSES = {"S3", "S4"}
 MILESTONES = [1, 2, 3, 6, 9, 12]
 
 def db():
-    if DATABASE_URL:
-        return PostgresCompat(DATABASE_URL)
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():

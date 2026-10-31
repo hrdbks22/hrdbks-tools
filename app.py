@@ -10,8 +10,6 @@ from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 
 st.set_page_config(page_title="HRD Tools | PT. Berkat Karunia Surya", page_icon="📋", layout="wide")
-DB = "hrd_tools.db"
-
 # Penyimpanan lokal: seluruh data disimpan pada file SQLite di perangkat.
 DB = os.path.abspath(os.environ.get("HRD_DB_PATH", "hrd_tools.db"))
 
@@ -38,31 +36,6 @@ def db():
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
-    with db() as c:
-            now = datetime.now().isoformat(timespec="seconds")
-            for username,nama,role,shift,_ in INITIAL_USERS:
-                bootstrap_password = str(bootstrap_users.get(username, "")).strip()
-                if bootstrap_password and not bootstrap_password.startswith("GANTI_"):
-                    salt = os.urandom(16)
-                    digest = hashlib.pbkdf2_hmac("sha256", bootstrap_password.encode("utf-8"), salt, 310000)
-                    bootstrap_hash = salt.hex() + ":" + digest.hex()
-                else:
-                    bootstrap_hash = None
-                c.execute("""INSERT INTO users(username,nama,role,shift,require_password,password_hash,active,created_at,updated_at)
-                             VALUES(?,?,?,?,1,?,1,?,?)
-                             ON CONFLICT(username) DO UPDATE SET
-                               require_password=1,
-                               password_hash=COALESCE(users.password_hash, EXCLUDED.password_hash),
-                               updated_at=EXCLUDED.updated_at""",
-                          (username,nama,role,shift,bootstrap_hash,now,now))
-            defaults = {"Admin HRD": MENU_ITEMS, "Tally": ["Dashboard","Panggilan Karyawan"]}
-            for role, menus_for_role in defaults.items():
-                existing = c.execute("SELECT COUNT(*) FROM menu_permissions WHERE role=?", (role,)).fetchone()[0]
-                if existing == 0:
-                    for item in MENU_ITEMS:
-                        c.execute("INSERT INTO menu_permissions(role,menu,allowed) VALUES(?,?,?)",
-                                  (role,item,1 if item in menus_for_role else 0))
-        return
     with db() as c:
         c.executescript("""
         CREATE TABLE IF NOT EXISTS users(

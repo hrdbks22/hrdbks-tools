@@ -7,9 +7,23 @@ echo ==========================================
 echo   HRD TOOLS - PT. BERKAT KARUNIA SURYA
 echo ==========================================
 echo.
-echo HRD Tools akan memakai Python 3.12 dan lingkungan .venv.
-echo Pustaka aplikasi dipasang terpisah, tidak ke Python global.
+echo Pemeriksaan file aplikasi dan Python...
 echo.
+
+REM Ambil file aplikasi dari GitHub jika belum ada di folder ini.
+where curl >nul 2>nul
+if errorlevel 1 goto no_curl
+
+if not exist "hrd_tools.py" (
+    echo Mengunduh hrd_tools.py dari GitHub...
+    curl -fL --retry 3 -o "hrd_tools.py" "https://raw.githubusercontent.com/hrdbks22/hrdbks-tools/desktop-tkinter-local/desktop/hrd_tools.py"
+    if errorlevel 1 goto download_error
+)
+if not exist "requirements.txt" (
+    echo Mengunduh requirements.txt dari GitHub...
+    curl -fL --retry 3 -o "requirements.txt" "https://raw.githubusercontent.com/hrdbks22/hrdbks-tools/desktop-tkinter-local/desktop/requirements.txt"
+    if errorlevel 1 goto download_error
+)
 
 set "PYTHON_EXE="
 set "PYTHON_LAUNCHER="
@@ -21,30 +35,25 @@ if not errorlevel 1 (
     if not errorlevel 1 set "PYTHON_LAUNCHER=py -3.12"
 )
 
-REM Jika belum ada, coba lokasi instalasi per-user yang umum.
+REM Coba lokasi instalasi per-user yang umum.
 if not defined PYTHON_LAUNCHER (
     if exist "%LocalAppData%\Programs\Python\Python312\python.exe" (
         set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python312\python.exe"
     )
 )
 
-REM Jika Python 3.12 belum ada, pasang otomatis melalui Windows Package Manager.
+REM Pasang Python 3.12 otomatis jika belum ada.
 if not defined PYTHON_LAUNCHER if not defined PYTHON_EXE (
     echo Python 3.12 belum ditemukan.
     where winget >nul 2>nul
     if errorlevel 1 goto no_winget
-
-    echo.
-    echo Mengunduh dan memasang Python 3.12 64-bit untuk akun Windows ini...
-    echo Mohon tunggu. Komputer harus terhubung ke internet.
+    echo Mengunduh dan memasang Python 3.12 64-bit...
     winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements
     if errorlevel 1 goto install_error
-
     if exist "%LocalAppData%\Programs\Python\Python312\python.exe" (
         set "PYTHON_EXE=%LocalAppData%\Programs\Python\Python312\python.exe"
     )
 )
-
 if not defined PYTHON_LAUNCHER if not defined PYTHON_EXE goto install_error
 
 echo.
@@ -71,7 +80,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo.
-echo Memasang pustaka yang diperlukan hanya di .venv...
+echo Memasang pustaka aplikasi hanya di .venv...
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r requirements.txt
 if errorlevel 1 goto package_error
 
@@ -88,18 +97,27 @@ echo Selesai.
 pause
 exit /b 0
 
+:no_curl
+echo [GAGAL] Perintah curl tidak tersedia pada Windows ini.
+echo Gunakan Windows 10/11 yang sudah diperbarui, lalu coba lagi.
+pause
+exit /b 1
+
+:download_error
+echo [GAGAL] File aplikasi tidak berhasil diunduh dari GitHub.
+echo Periksa koneksi internet, lalu jalankan ulang BAT.
+pause
+exit /b 1
+
 :no_winget
 echo [GAGAL] Python 3.12 belum ada dan winget tidak ditemukan.
-echo Pasang Python 3.12 dari https://www.python.org/downloads/release/python-31210/
-echo atau perbarui App Installer dari Microsoft Store, lalu ulangi.
+echo Perbarui App Installer dari Microsoft Store, lalu ulangi.
 pause
 exit /b 1
 
 :install_error
 echo [GAGAL] Python 3.12 tidak berhasil dipasang atau tidak ditemukan.
 echo Pastikan internet aktif dan Windows mendukung winget.
-echo Anda dapat memasang Python 3.12 dari:
-echo https://www.python.org/downloads/release/python-31210/
 pause
 exit /b 1
 

@@ -2,7 +2,7 @@
 HRD Tools Desktop - PT. Berkat Karunia Surya
 Aplikasi lokal berbasis Tkinter + SQLite. Tidak memerlukan server.
 """
-import os, sqlite3, hashlib, secrets, hmac, zipfile
+import os, sqlite3, hashlib, secrets, hmac, zipfile, traceback, sys
 from pathlib import Path
 from datetime import datetime, date
 from html.parser import HTMLParser
@@ -325,6 +325,31 @@ class HRDApp(tk.Tk):
         ttk.Label(self.content,text="Fitur ubah password, peran, dan izin menu akan ditambahkan pada penyelesaian modul administrasi.",
                   wraplength=700).pack(anchor="w")
 
-if __name__=="__main__":
+def main():
+    # Pastikan aplikasi dijalankan dari folder file ini, bukan folder kerja terminal.
+    os.chdir(BASE_DIR)
     init_db()
-    HRDApp().mainloop()
+    app = HRDApp()
+    app.mainloop()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        error_text = traceback.format_exc()
+        log_path = BASE_DIR / "hrd_tools_error.log"
+        try:
+            log_path.write_text(error_text, encoding="utf-8")
+        except Exception:
+            pass
+        print(error_text, file=sys.stderr)
+        try:
+            messagebox.showerror(
+                "HRD Tools - Terjadi Kesalahan",
+                f"Aplikasi tidak dapat dijalankan.\n\n{exc}\n\n"
+                f"Detail kesalahan tersimpan di:\n{log_path}"
+            )
+        except Exception:
+            pass
+        input("Tekan Enter untuk keluar...")

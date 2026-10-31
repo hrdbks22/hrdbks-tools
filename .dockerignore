@@ -1,9 +1,0 @@
-.git
-.github
-.venv
-__pycache__
-*.py[cod]
-*.db
-.streamlit/secrets.toml
-*.dump
-*.sql.gz

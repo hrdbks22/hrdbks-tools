@@ -2,11 +2,8 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import re
-import psycopg
-from psycopg.rows import tuple_row
 import io
 import hashlib
-import json
 import hmac
 import os
 from datetime import date, datetime
@@ -15,48 +12,11 @@ from dateutil.relativedelta import relativedelta
 st.set_page_config(page_title="HRD Tools | PT. Berkat Karunia Surya", page_icon="📋", layout="wide")
 DB = "hrd_tools.db"
 
-# Cloud Run + Cloud SQL (PostgreSQL) uses the Cloud SQL Unix socket.
-# Credentials are injected as environment variables / Secret Manager secrets.
-CLOUD_SQL_INSTANCE = os.environ.get("INSTANCE_CONNECTION_NAME", "").strip()
-CLOUD_SQL_DB = os.environ.get("DB_NAME", "").strip()
-CLOUD_SQL_USER = os.environ.get("DB_USER", "").strip()
-CLOUD_SQL_PASSWORD = os.environ.get("DB_PASS", "")
+# Penyimpanan lokal: seluruh data disimpan pada file SQLite di perangkat.
+DB = os.path.abspath(os.environ.get("HRD_DB_PATH", "hrd_tools.db"))
 
-if CLOUD_SQL_INSTANCE and CLOUD_SQL_DB and CLOUD_SQL_USER and CLOUD_SQL_PASSWORD:
-    DATABASE_URL = psycopg.conninfo.make_conninfo(
-        host=f"/cloudsql/{CLOUD_SQL_INSTANCE}",
-        dbname=CLOUD_SQL_DB,
-        user=CLOUD_SQL_USER,
-        password=CLOUD_SQL_PASSWORD,
-        connect_timeout=10,
-    )
-else:
-    try:
-        STREAMLIT_DATABASE_URL = str(st.secrets.get("DATABASE_URL", "")).strip()
-    except Exception:
-        STREAMLIT_DATABASE_URL = ""
-    DATABASE_URL = (
-        os.environ.get("APP_DATABASE_URL")
-        or os.environ.get("DATABASE_URL")
-        or STREAMLIT_DATABASE_URL
-    ).strip()
-
-class PostgresCompat:
-    """Connection wrapper retaining the app's positional ? placeholders."""
-    def __init__(self, dsn):
-        self.conn = psycopg.connect(dsn, row_factory=tuple_row)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        try:
-            self.conn.commit() if exc_type is None else self.conn.rollback()
-        finally:
-            self.conn.close()
-
-    def execute(self, sql, params=()):
-        return self.conn.execute(sql.replace("?", "%s"), params)
+def db():
+    return sqlite3.connect(DB, check_same_thread=False)
 
 MENU_ITEMS = ["Dashboard","Master Data Karyawan","Data Absensi","Arsip & Monitoring SP","Evaluasi Karyawan (H3)","Daftar Karyawan Tidak Lanjut Kontrak","Panggilan Karyawan","Riwayat Karyawan"]
 ROLE_NAMES = ["Super Admin","Admin HRD","Tally"]
@@ -78,22 +38,7 @@ def db():
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
-    if DATABASE_URL:
-        # Online accounts must always use passwords. Bootstrap passwords are supplied
-        # only through Streamlit Secrets and are stored as salted PBKDF2 hashes.
-        try:
-            bootstrap_users = dict(st.secrets.get("users", {}))
-        except Exception:
-            bootstrap_users = {}
-        # Cloud Run can supply bootstrap credentials through Secret Manager.
-        # The JSON secret should map each seeded username to a unique password.
-        try:
-            cloud_bootstrap_users = json.loads(os.environ.get("BOOTSTRAP_USERS_JSON", "{}"))
-            if isinstance(cloud_bootstrap_users, dict):
-                bootstrap_users.update(cloud_bootstrap_users)
-        except (TypeError, ValueError):
-            cloud_bootstrap_users = {}
-        with db() as c:
+    with db() as c:
             now = datetime.now().isoformat(timespec="seconds")
             for username,nama,role,shift,_ in INITIAL_USERS:
                 bootstrap_password = str(bootstrap_users.get(username, "")).strip()
@@ -324,7 +269,7 @@ if menu == "Pengaturan Username" and is_super_admin:
                                  VALUES(?,?,?,?,?,?,1,?,?)""",
                               (new_username,new_name,new_role,new_shift,int(new_requires),password_hash(new_password) if new_requires else None,datetime.now().isoformat(),datetime.now().isoformat()))
                     st.success("Akun berhasil ditambahkan."); st.rerun()
-                except (sqlite3.IntegrityError, psycopg.IntegrityError): st.error("Username sudah terdaftar.")
+                except sqlite3.IntegrityError: st.error("Username sudah terdaftar.")
     st.markdown("**Ubah akun yang sudah terdaftar**")
     choices = accounts_df.username.tolist() if len(accounts_df) else []
     if choices:
